@@ -17,13 +17,10 @@ module Crynamo
     class MarshallException < Exception
     end
 
-    # Converts a `NamedTuple` to a DynamoDB `Hash` representation
-    def to_dynamo(tuple : NamedTuple) : Hash
-      hash = tuple.to_h
-      keys = tuple.keys.to_a
-
-      dynamodb_values = hash.values.map do |value|
-        case value
+    def dynamodb_value_map(value)
+      case value
+        when AWS::DynamoDB::DDB::KeyConditionExpression
+          dynamodb_value_map(value.value)
         when String
           {DynamoDB::TypeDescriptor.string => value}
         when Number
@@ -43,6 +40,15 @@ module Crynamo
         else
           raise MarshallException.new "Couldn't marshal Crystal type #{typeof(value)} to DynamoDB type"
         end
+    end
+
+    # Converts a `NamedTuple` to a DynamoDB `Hash` representation
+    def to_dynamo(tuple : NamedTuple) : Hash
+      hash = tuple.to_h
+      keys = tuple.keys.to_a
+
+      dynamodb_values = hash.values.map do |value|
+        dynamodb_value_map(value)
       end
 
       Hash.zip(keys, dynamodb_values)
@@ -50,12 +56,29 @@ module Crynamo
 
     # { product_id: product.id }
     def to_expressions(tuple : NamedTuple)# : Tuple(String, Hash(String, Hash(String, String | Hash(String, String) | Hash(String, Bool))))
-      key_condition_expression = tuple.keys.to_a.map{|key| "#{key} = :#{key}"}.join(" AND ")
+      key_condition_expression = tuple.keys.to_a.map do |key|
+        v = tuple[key]
+        case v
+        when AWS::DynamoDB::DDB::KeyConditionExpression
+          s = v.condition
+          "#{key} #{s} :#{key}"
+        else
+          "#{key} = :#{key}"
+        end
+      end.join(" AND ")
 
       expression_attribute_values = {} of String => Hash(String, Bool) | Hash(String, String)
+
+      # unwrap value in key condition tuple
+
       marshalled = to_dynamo(tuple)
       marshalled.each do |key, value|
-        expression_attribute_values[":#{key}"] = value
+        case value
+        when AWS::DynamoDB::DDB::KeyConditionExpression
+          expression_attribute_values[":#{key}"] = value.value
+        else
+          expression_attribute_values[":#{key}"] = value
+        end
       end
 
       {key_condition_expression, expression_attribute_values}

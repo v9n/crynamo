@@ -30,7 +30,8 @@ module Crynamo
       query = {
         TableName: table,
         KeyConditionExpression: key_condition_expression,
-        ExpressionAttributeValues: expression_attribute_values
+        ExpressionAttributeValues: expression_attribute_values,
+        Limit: 100,
       }
 
       result = request(AWS::DynamoDB::Operation::Query, query)
